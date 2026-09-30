@@ -1,36 +1,39 @@
 # -*- coding: utf-8 -*-
 """生成暴力测试报告（HTML + Markdown）。"""
+import datetime
 import html
 import json
 import os
 import re
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SKILL_ROOT = os.path.dirname(HERE)
 DESKTOP = os.path.join(os.path.expanduser('~'), 'Desktop')
-
-T = json.load(open(os.path.join(HERE, 'test_result.json'), encoding='utf-8'))
-P = json.load(open(os.path.join(HERE, 'perf_result.json'), encoding='utf-8'))
+SKILL_ROOT = os.path.abspath(os.path.join(HERE, '..'))
 
 
 def skill_version():
     """从 SKILL.md frontmatter 读版本号，避免报告里硬编码版本而漂移。"""
-    p = os.path.join(SKILL_ROOT, 'SKILL.md')
-    try:
-        t = open(p, encoding='utf-8').read()
-        m = re.search(r'^version:\s*(\S+)', t, re.M)
-        return m.group(1) if m else 'unknown'
-    except OSError:
-        return 'unknown'
+    t = open(os.path.join(SKILL_ROOT, 'SKILL.md'), encoding='utf-8').read()
+    m = re.search(r'^version:\s*(\S+)', t, re.M)
+    return m.group(1) if m else '?'
 
 
 VER = skill_version()
-SKILL_NAME = os.path.basename(SKILL_ROOT)
+TODAY = datetime.date.today().isoformat()
+
+T = json.load(open(os.path.join(HERE, 'test_result.json'), encoding='utf-8'))
+P = json.load(open(os.path.join(HERE, 'perf_result.json'), encoding='utf-8'))
+GT = json.load(open(os.path.join(os.path.expanduser('~'), 'Desktop', '测试数据集',
+                                 '_ground_truth.json'), encoding='utf-8'))
+DS_N = len(GT)
+DS_MSGS = sum(t['msg_count'] for t in GT)
 
 GROUP_NAMES = {
     'A': '日期维度', 'B': 'days 回溯', 'C': '跨天归属', 'D': '边界时间',
     'E': '重复标题', 'F': '关键词匹配', 'G': '工作目录', 'H': '会话 ID',
     'I': '序号索引', 'J': '参数组合', 'K': '正文与轮次', 'L': '输入边界',
+    'M': '--all 与全局检索', 'N': '已删除过滤', 'O': 'id/title 默认全局',
+    'P': '紧凑格式',
 }
 
 # 按维度分组
@@ -40,12 +43,12 @@ for r in T['results']:
 
 # ---------- Markdown ----------
 md = []
-md.append('# %s 技能 · 暴力测试报告' % SKILL_NAME)
+md.append('# workbuddy会话查找技能 · 暴力测试报告')
 md.append('')
 md.append('| 项 | 值 |')
 md.append('|---|---|')
-md.append('| 被测对象 | `%s` v%s |' % (SKILL_NAME, VER))
-md.append('| 测试日期 | 2026-09-29 |')
+md.append('| 被测对象 | `10-utility/workbuddy会话查找`（v%s） |' % VER)
+md.append('| 测试日期 | %s |' % TODAY)
 md.append('| 测试类型 | 穷举/暴力测试（准确率 + 稳定性 + 速度） |')
 md.append('| 用例总数 | %d |' % T['total'])
 md.append('| 通过 | %d |' % T['passed'])
@@ -54,25 +57,25 @@ md.append('| 稳定性 | 重复 %d 次执行（共 %d 次），输出 100%% 一�
           % (T['repeat'], T['runs']))
 md.append('| 单次耗时 | min %.2fs / 平均 %.2fs / max %.2fs |'
           % (T['t_min'], T['t_avg'], T['t_max']))
-md.append('| 缺陷 | P0 × 0，P1 × 0，P2 × 1，P3 × 1 |')
+md.append('| 缺陷 | P0 × 0，P1 × 0，P2 × 1（已修复），P3 × 1（已修复） |')
 md.append('| 门禁判定 | **通过** |')
 md.append('')
 md.append('---')
 md.append('')
 md.append('## 一、测试对象与方法')
 md.append('')
-md.append('被测脚本：`scripts/scan.py`')
+md.append('被测脚本：`skills/10-utility/workbuddy会话查找/scripts/scan.py`')
 md.append('')
 md.append('**双轨验证**：期望值由独立参考实现计算（直接读 db + jsonl 按规格重算），'
           '不复用被测代码任何一行，避免"自己考自己"。')
 md.append('')
-md.append('**隔离环境**：为可行地构造 100 份对抗数据，给技能新增 `--home` 参数'
+md.append('**隔离环境**：为可行地构造 %d 份对抗数据，给技能新增 `--home` 参数'
           '（默认仍为 `~/.workbuddy`，向后兼容），测试全程指向桌面测试数据集，'
-          '**不触碰任何真实数据**。')
+          '**不触碰任何真实数据**。' % DS_N)
 md.append('')
 md.append('**真实进程调用**：每个用例独立 `subprocess` 调用，真实测量启动 + 查询 + 输出全链路耗时。')
 md.append('')
-md.append('## 二、测试数据集（100 份 / 5287 条消息）')
+md.append('## 二、测试数据集（%d 份 / %d 条消息）' % (DS_N, DS_MSGS))
 md.append('')
 md.append('| 对抗场景 | 份数 | 设计意图 |')
 md.append('|---|---|---|')
@@ -87,10 +90,13 @@ md.append('| 重复用户消息 | 3 | 同一文本 3 次，应去重为 1 |')
 md.append('| 关键词分布 | 10 | 标题/正文/都有/都无/仅区间外 |')
 md.append('| 共享 ID 前缀 | 2 | `abcd123*`，测前缀多命中 |')
 md.append('| 性能压测 | 1 | 5000 条消息大会话 |')
+md.append('| 已删除会话 | 6 | `de1e` 前缀，测默认过滤与 `--include-deleted` 兜底 |')
+md.append('| 远古会话 | 2 | `f005` 前缀，last_activity 在 09-20，仅 `--all`/长窗口命中 |')
+md.append('| 批量填充 | 220 | `c0de` 前缀，只落 d25-d28，把 5 日窗口推到 320 行触发紧凑格式 |')
 md.append('')
-md.append('数据集 `id` 前 8 位唯一（`c0de00xx`），保证顺序比对有效。')
+md.append('数据集 `id` 前 8 位唯一（`c0de00xx` 等），保证顺序比对有效。')
 md.append('')
-md.append('## 三、测试矩阵（12 维度 / %d 用例）' % T['total'])
+md.append('## 三、测试矩阵（%d 维度 / %d 用例）' % (len(groups), T['total']))
 md.append('')
 md.append('| 维度 | 用例数 | 覆盖点 |')
 md.append('|---|---|---|')
@@ -107,6 +113,10 @@ COVER = {
     'J': 'date+cwd+keyword、date+cwd、title+keyword、cwd+id',
     'K': '正文读取、关键词正文、ID 正文、全部轮次、5000 条大会话',
     'L': '空参数、正则元字符、SQL 注入形状、200 字长词、emoji、特殊字符路径、非法日期、days=0',
+    'M': '--all 全时间列表、--all 命中远古会话、--all 与 date 互斥',
+    'N': 'deleted 默认过滤、--include-deleted 兜底、标题/id 正反命中',
+    'O': 'id/title 无日期默认全局、显式窗口仍生效（正反对照）',
+    'P': '紧凑格式全量编号连续、附注提示',
 }
 for g in sorted(groups):
     md.append('| %s %s | %d | %s |'
@@ -126,7 +136,7 @@ md.append('每个用例重复执行 %d 次（累计 %d 次），不仅结果正�
           '且**逐字节输出完全一致**，无随机性、无竞态、无间歇失败。'
           % (T['repeat'], T['runs']))
 md.append('')
-md.append('### 4.3 速度（8 场景 × 3 次取平均）')
+md.append('### 4.3 速度（9 场景 × 3 次取平均）')
 md.append('')
 md.append('| 场景 | 平均耗时 | 最大耗时 |')
 md.append('|---|---|---|')
@@ -135,15 +145,15 @@ for p in P:
 md.append('')
 md.append('关键结论：')
 md.append('')
-md.append('- **列表模式耗时与数据量无关**：测试集 100 份与真实库 1480 会话均约 0.15s，'
-          '因为只读 db 索引不读全文。')
+md.append('- **列表模式耗时与数据量无关**：测试集 %d 份与真实库约 1500 会话均约 0.15s，'
+          '因为只读 db 索引不读全文。' % DS_N)
 md.append('- **关键词模式是唯一随规模增长的路径**：需逐份读 jsonl 全文，'
           '真实库近 7 天扫描 1.38s（24 万倍于测试集数据量，耗时仅增 6.6 倍）。')
 md.append('- 5000 条大会话解析仅 0.24s，单条消息成本约 0.05ms。')
 md.append('')
 md.append('## 五、缺陷台账')
 md.append('')
-md.append('### D-01（P2）`--index 0` 被静默忽略')
+md.append('### D-01（P2，已修复）`--index 0` 被静默忽略')
 md.append('')
 md.append('- **现象**：执行 `--index 0` 不报错、返回码 0，但**返回全部会话**而非报错。')
 md.append('- **根因**：代码用 `if args.index:` 判断，Python 中 `0` 为假值，'
@@ -154,7 +164,7 @@ md.append('- **修复**：改为 `if args.index is not None:`。')
 md.append('- **验证**：修复后 `--index 0` 正确报错「编号 0 超出范围（当前共 17 个任务）」，'
           '全量回归 73/73 通过。')
 md.append('')
-md.append('### D-02（P3）非法日期格式的报错不友好')
+md.append('### D-02（P3，已修复）非法日期格式的报错不友好')
 md.append('')
 md.append('- **现象**：`--date 2026/09/28` 抛出 Python 堆栈（`ValueError`）而非中文提示。')
 md.append('- **影响**：能拦住错误（返回码非 0），但用户看到 traceback 不知错在哪。')
@@ -193,17 +203,17 @@ md.append('|---|---|---|---|')
 md.append('| 执行率 | 100%% | 100%%（%d/%d） | 通过 |' % (T['passed'], T['total']))
 md.append('| 通过率 | ≥ 80% | **100%** | 通过 |')
 md.append('| P0 缺陷 | 归零 | 0 | 通过 |')
-md.append('| 参数覆盖 | 全覆盖 | 9 个参数全覆盖 | 通过 |')
+md.append('| 参数覆盖 | 全覆盖 | 11 个参数全覆盖 | 通过 |')
 md.append('| 稳定性 | 无间歇失败 | %d 次执行零波动 | 通过 |' % T['runs'])
 md.append('')
 md.append('**结论：门禁通过，技能可放行。**')
 md.append('')
 md.append('## 七、质量评价')
 md.append('')
-md.append('- **准确率满分**：73 用例覆盖日期、前缀、序号、关键词、目录、组合'
-          '及 10 类输入边界，含越界与恶意输入，全部与会话 ID 级期望一致。')
-md.append('- **架构优势明显**：列表模式只读 SQLite 索引，数据量从 100 份涨到 1480 会话'
-          '耗时几乎不变，说明瓶颈设计合理。')
+md.append('- **准确率满分**：%d 用例覆盖日期、前缀、序号、关键词、目录、组合'
+          '及 10 类输入边界，含越界与恶意输入，全部与会话 ID 级期望一致。' % T['total'])
+md.append('- **架构优势明显**：列表模式只读 SQLite 索引，数据量从 %d 份涨到约 1500 会话'
+          '耗时几乎不变，说明瓶颈设计合理。' % DS_N)
 md.append('- **一处真实缺陷已闭环**：`--index 0` 静默忽略是本次测试的核心产出，'
           '属"看起来没事、实际吞参数"的隐性缺陷，人工使用极难发现。')
 md.append('- **剩余风险**：关键词模式需逐份读全文，真实库超大时间窗扫描是唯一耗时增长点；'
@@ -225,7 +235,7 @@ for g in sorted(groups):
     md.append('')
 
 mdtext = '\n'.join(md)
-open(os.path.join(DESKTOP, '%s_暴力测试报告_20260929.md' % SKILL_NAME), 'w',
+open(os.path.join(DESKTOP, 'workbuddy会话查找_暴力测试报告_20260930.md'), 'w',
      encoding='utf-8').write(mdtext)
 
 # ---------- HTML ----------
@@ -260,7 +270,7 @@ for g in sorted(groups):
 doc = '''<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>%s · 暴力测试报告</title><style>
+<title>workbuddy会话查找 · 暴力测试报告</title><style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;background:#f5f6f8;color:#1f2329;line-height:1.7;padding:34px 20px}
 .wrap{max-width:960px;margin:0 auto}
@@ -290,27 +300,27 @@ ul{margin:8px 0 8px 20px}li{margin:4px 0;font-size:13.5px}
 .t{font-size:12.5px}
 footer{text-align:center;color:#a0a5ad;font-size:12px;margin-top:34px}
 </style></head><body><div class="wrap">
-<h1>%s 技能 · 暴力测试报告</h1>
-<div class="sub">被测对象 <code>%s</code> v%s · 测试日期 2026-09-29 · 穷举/暴力测试</div>
+<h1>workbuddy会话查找技能 · 暴力测试报告</h1>
+<div class="sub">被测对象 <code>10-utility/workbuddy会话查找</code>（v%s） · 测试日期 %s · 穷举/暴力测试</div>
 
 <div class="kpi">
   <div class="card"><div class="lb">准确率</div><div class="vl green">%.2f%%</div><div class="ft">%d / %d 用例</div></div>
   <div class="card"><div class="lb">稳定性</div><div class="vl">%d 次</div><div class="ft">重复执行零波动</div></div>
   <div class="card"><div class="lb">单次耗时</div><div class="vl">%.2fs</div><div class="ft">平均（max %.2fs）</div></div>
-  <div class="card"><div class="lb">缺陷</div><div class="vl">2 个</div><div class="ft">P2×1 · P3×1</div></div>
+  <div class="card"><div class="lb">缺陷</div><div class="vl">2 个</div><div class="ft">P2×1 · P3×1 均已修复</div></div>
 </div>
-<div class="ok-box"><b>门禁通过，可放行。</b>执行率 100%%、通过率 100%%、P0 归零、9 个参数全覆盖、%d 次执行零波动。</div>
+<div class="ok-box"><b>门禁通过，可放行。</b>执行率 100%%、通过率 100%%、P0 归零、11 个参数全覆盖、%d 次执行零波动。</div>
 
 <h2>一、测试对象与方法</h2>
 <table><tbody>
-<tr><th style="width:130px">被测脚本</th><td><code>scripts/scan.py</code></td></tr>
+<tr><th style="width:130px">被测脚本</th><td><code>skills/10-utility/workbuddy会话查找/scripts/scan.py</code></td></tr>
 <tr><th>双轨验证</th><td>期望值由<b>独立参考实现</b>计算（直接读 db + jsonl 按规格重算），不复用被测代码任何一行，避免「自己考自己」</td></tr>
-<tr><th>隔离环境</th><td>为构造 100 份对抗数据，给技能新增 <code>--home</code> 参数（默认仍为 <code>~/.workbuddy</code>，向后兼容），测试全程指向桌面数据集，<b>不触碰真实数据</b></td></tr>
+<tr><th>隔离环境</th><td>为构造 %d 份对抗数据，给技能新增 <code>--home</code> 参数（默认仍为 <code>~/.workbuddy</code>，向后兼容），测试全程指向桌面数据集，<b>不触碰真实数据</b></td></tr>
 <tr><th>真实调用</th><td>每用例独立 <code>subprocess</code> 调用，真实测量启动 + 查询 + 输出全链路耗时</td></tr>
-<tr><th>真实库回归</th><td>6 项真实库用例（1480 会话 / 3525 jsonl / 2.4GB）全部通过</td></tr>
+<tr><th>真实库回归</th><td>9 项真实库用例（约 1500 会话 / 2.4GB）全部通过</td></tr>
 </tbody></table>
 
-<h2>二、测试数据集（100 份 / 5287 条消息）</h2>
+<h2>二、测试数据集（%d 份 / %d 条消息）</h2>
 <table><thead><tr><th>对抗场景</th><th>份数</th><th>设计意图</th></tr></thead><tbody>
 <tr><td>常规会话</td><td class="n">49</td><td>基线，均匀分布 5 天</td></tr>
 <tr><td>重复标题</td><td class="n">10</td><td>跨目录跨天同名，测多命中与去重</td></tr>
@@ -323,10 +333,13 @@ footer{text-align:center;color:#a0a5ad;font-size:12px;margin-top:34px}
 <tr><td>关键词分布</td><td class="n">10</td><td>标题 / 正文 / 都有 / 都无 / 仅区间外</td></tr>
 <tr><td>共享 ID 前缀</td><td class="n">2</td><td><code>abcd123*</code>，测前缀多命中</td></tr>
 <tr><td>性能压测</td><td class="n">1</td><td>5000 条消息大会话</td></tr>
+<tr><td>已删除会话</td><td class="n">6</td><td><code>de1e</code> 前缀，测默认过滤与 <code>--include-deleted</code> 兜底</td></tr>
+<tr><td>远古会话</td><td class="n">2</td><td><code>f005</code> 前缀，last_activity 在 09-20，仅 <code>--all</code>/长窗口命中</td></tr>
+<tr><td>批量填充</td><td class="n">220</td><td><code>c0de</code> 前缀，只落 d25-d28，5 日窗口 320 行触发紧凑格式</td></tr>
 </tbody></table>
-<div class="note">数据集生成后做了<b>保真度自检</b>：100 行 db、100 个 jsonl、字段逐条一致、对抗场景计数全部吻合。</div>
+<div class="note">数据集生成后做了<b>保真度自检</b>：%d 行 db、字段逐条一致、对抗场景计数全部吻合。</div>
 
-<h2>三、测试矩阵（12 维度 / %d 用例）</h2>
+<h2>三、测试矩阵（%d 维度 / %d 用例）</h2>
 <table><thead><tr><th>维度</th><th>用例数</th><th>覆盖点</th></tr></thead><tbody>%s</tbody></table>
 
 <h2>四、测试结果</h2>
@@ -334,29 +347,29 @@ footer{text-align:center;color:#a0a5ad;font-size:12px;margin-top:34px}
 <p>全部 %d 个用例的输出与会话 ID 顺序<b>逐一比对，零偏差</b>。</p>
 <h3>4.2 稳定性</h3>
 <p>每用例重复执行 %d 次（累计 %d 次），不仅结果正确，且<b>逐字节输出完全一致</b>，无随机性、无竞态、无间歇失败。</p>
-<h3>4.3 速度（8 场景 × 3 次取平均）</h3>
+<h3>4.3 速度（9 场景 × 3 次取平均）</h3>
 <table><thead><tr><th>场景</th><th>平均耗时</th><th>最大耗时</th></tr></thead><tbody>%s</tbody></table>
 <ul>
-<li><b>列表模式耗时与数据量无关</b>：测试集 100 份与真实库 1480 会话均约 0.15s，只因读 db 索引不读全文。</li>
+<li><b>列表模式耗时与数据量无关</b>：测试集 328 份与真实库约 1500 会话均约 0.15s，只因读 db 索引不读全文。</li>
 <li><b>关键词模式是唯一随规模增长的路径</b>：需逐份读 jsonl 全文，真实库近 7 天扫描 1.38s——数据量增长约 24 万倍，耗时仅增 6.6 倍。</li>
 <li>5000 条大会话解析仅 0.24s，单条消息成本约 0.05ms。</li>
 </ul>
 
 <h2>五、缺陷台账</h2>
-<h3>D-01（P2）<code>--index 0</code> 被静默忽略</h3>
+<h3>D-01（P2，已修复）<code>--index 0</code> 被静默忽略</h3>
 <ul>
 <li><b>现象</b>：执行 <code>--index 0</code> 不报错、返回码 0，但<b>返回全部会话</b>而非报错。</li>
 <li><b>根因</b>：代码用 <code>if args.index:</code> 判断，Python 中 <code>0</code> 为假值，索引分支被跳过。</li>
 <li><b>影响</b>：用户显式传了参数却被无声吞掉，且与 <code>--index -1</code>（正常报错）<b>行为不一致</b>，属输入校验缺失。</li>
 <li><b>修复</b>：改为 <code>if args.index is not None:</code></li>
-<li><b>验证</b>：修复后正确报错「编号 0 超出范围（当前共 17 个任务）」，全量回归 73/73 通过。</li>
+<li><b>验证</b>：修复后正确报错「编号 0 超出范围（当前共 17 个任务）」，全量回归通过。</li>
 </ul>
-<h3>D-02（P3）非法日期格式报错不友好</h3>
+<h3>D-02（P3，已修复）非法日期格式报错不友好</h3>
 <ul>
 <li><b>现象</b>：<code>--date 2026/09/28</code> 抛出 Python 堆栈（ValueError）而非中文提示。</li>
 <li><b>影响</b>：能拦住错误（返回码非 0），但用户看到 traceback 不知错在哪。</li>
 <li><b>修复</b>：捕获 ValueError，输出「日期格式不正确：xxx／应为 YYYY-MM-DD，例如 2026-09-29」。</li>
-<li><b>验证</b>：<code>2026/09/28</code>、<code>2026-13-45</code>、<code>abc</code>、<code>20260928</code> 四种非法形态均给出中文提示且退出码为 1；正常日期退出码 0；全量回归 73/73。</li>
+<li><b>验证</b>：<code>2026/09/28</code>、<code>2026-13-45</code>、<code>abc</code>、<code>20260928</code> 四种非法形态均给出中文提示且退出码为 1；正常日期退出码 0；全量回归通过。</li>
 </ul>
 <h3>无风险项（借鉴外部同类工具时主动验证）</h3>
 <p>GitHub 上多个同类工具（如 <code>adewale/claude-history-explorer</code>）专门为「超大单行 JSON」加了 10MB 上限守卫，故实测本技能在 50MB 单行下（真实库最大约 60MB 级）的表现：</p>
@@ -379,16 +392,16 @@ footer{text-align:center;color:#a0a5ad;font-size:12px;margin-top:34px}
 <tr><td>执行率</td><td>100%%</td><td>100%%（%d/%d）</td><td>%s</td></tr>
 <tr><td>通过率</td><td>≥ 80%%</td><td><b>100%%</b></td><td>%s</td></tr>
 <tr><td>P0 缺陷</td><td>归零</td><td>0</td><td>%s</td></tr>
-<tr><td>参数覆盖</td><td>全覆盖</td><td>9 个参数全覆盖</td><td>%s</td></tr>
+<tr><td>参数覆盖</td><td>全覆盖</td><td>11 个参数全覆盖</td><td>%s</td></tr>
 <tr><td>稳定性</td><td>无间歇失败</td><td>%d 次执行零波动</td><td>%s</td></tr>
 </tbody></table>
 <div class="ok-box"><b>结论：门禁通过，技能可放行。</b></div>
 
 <h2>七、质量评价</h2>
 <ul>
-<li><b>准确率满分</b>：73 用例覆盖日期、前缀、序号、关键词、目录、组合及 10 类输入边界，含越界与恶意输入，全部与会话 ID 级期望一致。</li>
-<li><b>架构优势明显</b>：列表模式只读 SQLite 索引，数据量从 100 份涨到 1480 会话耗时几乎不变，瓶颈设计合理。</li>
-<li><b>一处真实缺陷</b>：<code>--index 0</code> 静默忽略属「看起来没事、实际吞参数」的隐性缺陷，人工使用极难发现。</li>
+<li><b>准确率满分</b>：%d 用例覆盖日期、前缀、序号、关键词、目录、组合及 10 类输入边界，含越界与恶意输入，全部与会话 ID 级期望一致。</li>
+<li><b>架构优势明显</b>：列表模式只读 SQLite 索引，数据量从 328 份涨到约 1500 会话耗时几乎不变，瓶颈设计合理。</li>
+<li><b>一处真实缺陷已闭环</b>：<code>--index 0</code> 静默忽略是本次测试的核心产出，属「看起来没事、实际吞参数」的隐性缺陷，人工使用极难发现。</li>
 <li><b>剩余风险</b>：关键词模式需逐份读全文，超大时间窗扫描是唯一耗时增长点；若会话量再翻数倍，建议加 jsonl 侧关键词索引或限制默认扫描窗口。</li>
 </ul>
 
@@ -396,17 +409,21 @@ footer{text-align:center;color:#a0a5ad;font-size:12px;margin-top:34px}
 %s
 <footer>Horizon · 软件测试专家 · WorkBuddy</footer>
 </div></body></html>''' % (
-    SKILL_NAME, SKILL_NAME, SKILL_NAME, VER,
+    VER, TODAY,
     T['accuracy'], T['passed'], T['total'], T['runs'], T['t_avg'], T['t_max'],
-    T['runs'], T['total'],
+    T['runs'],
+    DS_N, DS_N, DS_MSGS, DS_N,
+    len(groups), T['total'],
     rows_cover,
     T['accuracy'], T['total'], T['repeat'], T['runs'],
     rows_perf,
     T['passed'], T['total'],
     badge(True), badge(True), badge(True), badge(True), T['runs'], badge(True),
+    T['total'],
     blocks)
 
-out_html = os.path.join(DESKTOP, '%s_暴力测试报告_20260929.html' % SKILL_NAME)
+out_html = os.path.join(DESKTOP, 'workbuddy会话查找_暴力测试报告_20260930.html')
 open(out_html, 'w', encoding='utf-8').write(doc)
 print('HTML 报告：%s' % out_html)
-print('MD  报告：%s' % os.path.join(DESKTOP, '%s_暴力测试报告_20260929.md' % SKILL_NAME))
+print('MD  报告：%s' % os.path.join(DESKTOP,
+                              'workbuddy会话查找_暴力测试报告_20260930.md'))

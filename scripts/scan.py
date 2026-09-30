@@ -1,18 +1,20 @@
 # -*- coding: utf-8 -*-
-"""会话任务检索 —— 跨会话读取本机 WorkBuddy 历史任务与对话内容。
+"""workbuddy会话查找 —— 跨会话读取本机 WorkBuddy 历史任务与对话内容。
 
 只读操作：读 workbuddy.db 会话索引 + projects/*.jsonl 对话全文。
 
 用法：
-    python scan.py                          # 今天的任务
+    python scan.py                          # 今天的任务（裸跑仅为 CLI 兼容）
     python scan.py --date 2026-09-28        # 指定某天
     python scan.py --days 3                 # 最近 3 天
+    python scan.py --all                    # 全部时间（与 --date/--days 互斥）
     python scan.py --cwd 数据流水线          # 按工作目录过滤
     python scan.py --keyword 脱敏            # 关键词过滤
     python scan.py --list                   # 只列会话（带编号）
     python scan.py --index 3                # 按编号精确命中单个任务
-    python scan.py --id a1b2c3d4            # 按会话 ID 前缀精确命中
-    python scan.py --title 脱敏              # 按标题精确命中
+    python scan.py --id a1b2c3d4            # 按会话 ID 前缀精确命中（未给日期时全局检索）
+    python scan.py --title 脱敏              # 按标题精确命中（未给日期时全局检索）
+    python scan.py --include-deleted        # 包含已删除的会话（默认只保留未删除）
     python scan.py --index 3 --all-turns    # 导出该任务全部回复轮次
     python scan.py --html                   # 输出 HTML 到桌面
     python scan.py --full                   # 结论不截断
@@ -31,6 +33,9 @@ HOME = os.path.expanduser('~') + '/.workbuddy'
 DB = HOME + '/workbuddy.db'
 PROJ = HOME + '/projects'
 DESKTOP = os.path.join(os.path.expanduser('~'), 'Desktop')
+
+MAX_TS = 2 ** 63 - 1      # 全时间窗上界（--all / id·title 全局检索用）
+COMPACT_AT = 200          # 列表超过此行数切换紧凑格式（省略目录列，保全量输出）
 
 
 def set_home(path):
@@ -128,15 +133,21 @@ def collect(sess, lo_ms, hi_ms, keyword=None):
 
 
 def main():
-    ap = argparse.ArgumentParser(description='跨会话检索 WorkBuddy 历史任务')
+    ap = argparse.ArgumentParser(
+        description='workbuddy会话查找 —— 跨会话检索本机 WorkBuddy 历史任务')
     ap.add_argument('--date', help='日期 YYYY-MM-DD，默认今天')
-    ap.add_argument('--days', type=int, default=0, help='最近 N 天')
+    ap.add_argument('--days', type=int, default=None,
+                    help='最近 N 天（含指定日或今天）；--days 0 等价 1 天；与 --all 互斥')
+    ap.add_argument('--all', action='store_true',
+                    help='全部时间（忽略日期窗口）；默认仍过滤已删除会话')
     ap.add_argument('--cwd', help='按工作目录关键词过滤')
     ap.add_argument('--keyword', help='按关键词过滤')
     ap.add_argument('--list', action='store_true', help='只列会话不读正文（带编号）')
     ap.add_argument('--index', type=int, help='按 --list 的编号精确命中单个任务')
-    ap.add_argument('--id', help='按会话 ID 前缀精确命中（如 a1b2c3d4）')
-    ap.add_argument('--title', help='按标题精确/模糊匹配单个任务')
+    ap.add_argument('--id', help='按会话 ID 前缀精确命中（如 a1b2c3d4；未给日期时全局检索）')
+    ap.add_argument('--title', help='按标题精确/模糊匹配单个任务（未给日期时全局检索）')
+    ap.add_argument('--include-deleted', action='store_true',
+                    help='包含已删除的会话（默认只保留 deleted_at 为空的）')
     ap.add_argument('--all-turns', action='store_true',
                     help='输出该会话全部轮次的 AI 回复（默认只出最后一条结论）')
     ap.add_argument('--html', action='store_true', help='输出 HTML 到桌面')
@@ -155,6 +166,8 @@ def main():
                  '若数据不在默认位置，用 --home <目录> 指定（该目录需含 workbuddy.db）'
                  % DB)
 
+    if args.all and (args.date is not None or args.days is not None):
+        sys.exit('--all 与 --date/--days 只能选其一：--all 表示全部时间，无需再给日期窗口')
     if args.date:
         try:
             d0 = datetime.datetime.strptime(args.date, '%Y-%m-%d').date()
@@ -163,25 +176,43 @@ def main():
                      % args.date)
     else:
         d0 = datetime.date.today()
-    # --days N = 从 d0 往前回溯 N 天（含 d0）
-    ndays = max(args.days, 1)
+    # --days N = 从 d0 往前回溯 N 天（含 d0）；None（未给）与 0 都等价 1 天
+    ndays = max(args.days or 1, 1)
     d_start = d0 - datetime.timedelta(days=ndays - 1)
     d_end = d0
 
-    lo = datetime.datetime.combine(d_start, datetime.time(0, 0)).timestamp() * 1000
-    hi = datetime.datetime.combine(d_end + datetime.timedelta(days=1),
-                                   datetime.time(0, 0)).timestamp() * 1000
+    if args.all:
+        lo, hi = 0, MAX_TS
+    else:
+        lo = datetime.datetime.combine(d_start, datetime.time(0, 0)).timestamp() * 1000
+        hi = datetime.datetime.combine(d_end + datetime.timedelta(days=1),
+                                       datetime.time(0, 0)).timestamp() * 1000
+
+    # --id/--title 未显式限定时间窗时默认全局检索（修掉"精确命中只查当天"的坑）；
+    # --index 例外：它绑定当次 --list 的编号，复跑必须带同样的范围参数
+    if (args.id or args.title) and not args.all \
+            and args.date is None and args.days is None:
+        lo, hi = 0, MAX_TS
+    full = (lo == 0 and hi >= MAX_TS)
 
     con = sqlite3.connect('file:%s?mode=ro' % DB, uri=True)
     con.row_factory = sqlite3.Row
+    cols = [r[1] for r in con.execute('pragma table_info(sessions)')]
+    conds, params = [], []
     # 双侧区间：会话的最后活跃时间必须落在 [lo, hi) 内，否则跨天会话会串进别的日期
-    rows = con.execute("""
-        select id,cwd,title,custom_title,created_at,last_activity_at,model
-        from sessions
-        where coalesce(last_activity_at,updated_at) >= ?
-          and coalesce(last_activity_at,updated_at) <  ?
-        order by coalesce(last_activity_at,updated_at) desc
-    """, (lo, hi)).fetchall()
+    if not full:
+        conds.append('coalesce(last_activity_at,updated_at) >= ?')
+        conds.append('coalesce(last_activity_at,updated_at) <  ?')
+        params += [lo, hi]
+    # 默认过滤已删除会话（deleted_at 非空）；列不存在时（老版本库/测试库）不拼该条件
+    if 'deleted_at' in cols and not args.include_deleted:
+        conds.append('deleted_at is null')
+    sql = ('select id,cwd,title,custom_title,created_at,last_activity_at,model '
+           'from sessions')
+    if conds:
+        sql += ' where ' + ' and '.join(conds)
+    sql += ' order by coalesce(last_activity_at,updated_at) desc'
+    rows = con.execute(sql, params).fetchall()
 
     if args.cwd:
         rows = [r for r in rows if args.cwd.lower() in (r['cwd'] or '').lower()]
@@ -222,20 +253,33 @@ def main():
             sys.exit('未找到标题包含「%s」的任务' % args.title)
         rows = hit
 
-    label = (d_start.strftime('%Y-%m-%d') if ndays == 1
-             else '%s ~ %s' % (d_start, d_end))
+    label = ('全部时间' if full
+             else (d_start.strftime('%Y-%m-%d') if ndays == 1
+                   else '%s ~ %s' % (d_start, d_end)))
     print('=' * 74)
-    print('WorkBuddy 任务检索 | %s' % label)
+    print('WorkBuddy 会话查找 | %s' % label)
     print('=' * 74)
 
     if args.list:
+        compact = len(rows) > COMPACT_AT
         for i, r in rows:
             t = r['custom_title'] or r['title'] or '(无标题)'
-            print('%2d. [%s] %-32s | %s' % (
-                i, r['id'][:8], t[:32], r['cwd']))
+            if compact:
+                print('%2d. [%s] %s' % (i, r['id'][:8], t[:32]))
+            else:
+                print('%2d. [%s] %-32s | %s' % (
+                    i, r['id'][:8], t[:32], r['cwd']))
         print('\n共 %d 个会话' % len(rows))
-        print('提示：用 --index N 直取第 N 个任务的完整内容')
+        if compact:
+            print('（结果较多，已切换紧凑格式：省略目录列；完整目录/正文用 --index N 查看）')
+        else:
+            print('提示：用 --index N 直取第 N 个任务的完整内容')
         return
+
+    if full and not precise and len(rows) > 50:
+        print('警告：全时间窗 + 正文模式将读取 %d 个会话全文（实测约 20 秒级）；'
+              '建议改用 --list 浏览编号，或加 --keyword/--cwd 收窄' % len(rows),
+              file=sys.stderr)
 
     cards = []
     need_full = bool(precise) or args.all_turns
@@ -287,9 +331,14 @@ def main():
     print('共 %d 个任务会话' % len(cards))
 
     if args.html:
-        out = args.out or os.path.join(
-            DESKTOP, '任务清单_%s.html' % (d_start.strftime('%Y%m%d') if ndays == 1
-                                        else '%s_%s' % (d_start.strftime('%Y%m%d'), d_end.strftime('%Y%m%d'))))
+        if full:
+            fname = '任务清单_全部.html'
+        elif ndays == 1:
+            fname = '任务清单_%s.html' % d_start.strftime('%Y%m%d')
+        else:
+            fname = '任务清单_%s_%s.html' % (d_start.strftime('%Y%m%d'),
+                                            d_end.strftime('%Y%m%d'))
+        out = args.out or os.path.join(DESKTOP, fname)
         write_html(out, cards, label)
         print('HTML 报告：%s' % out)
 
@@ -350,7 +399,7 @@ footer{text-align:center;color:#a0a5ad;font-size:12px;margin-top:28px}
 <h1>任务清单 · %s</h1>
 <div class="sub">共 %d 个任务会话 · 数据来自本地会话索引与对话全文</div>
 <div class="note"><b>这些内容一直在你电脑里。</b>索引在 <code>~/.workbuddy/workbuddy.db</code>，对话全文在 <code>~/.workbuddy/projects/&lt;工作目录&gt;/&lt;会话ID&gt;.jsonl</code>，每个会话一个文件，明文可读。</div>
-%s<footer>WorkBuddy · 会话任务检索</footer></div></body></html>''' % (
+%s<footer>WorkBuddy · workbuddy会话查找</footer></div></body></html>''' % (
         label, label, len(cards), blocks)
     open(out, 'w', encoding='utf-8').write(doc)
     return out

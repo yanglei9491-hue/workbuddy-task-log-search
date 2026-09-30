@@ -61,11 +61,19 @@ print('\nprojects 下 jsonl 文件数：%d' % tot)
 print('\n对抗场景抽样：')
 dup = con.execute("select count(*) from sessions where custom_title='重复任务名-数据清洗'").fetchone()[0]
 print('  重复标题份数：%d（期望 10）' % dup)
-pre = con.execute("select count(*) from sessions where id like 'abcd1234%'").fetchone()[0]
-print('  共享前缀 abcd1234 份数：%d（期望 2）' % pre)
+pre = con.execute("select count(*) from sessions where id like 'abcd123%'").fetchone()[0]
+print('  共享前缀 abcd123 份数：%d（期望 2）' % pre)
 big = con.execute("select id from sessions where title='超大会话 5000 条'").fetchone()
 if big:
     p = os.path.join(OUT, 'projects', encode_cwd('E:/workspace/perf-stress'),
                      big[0] + '.jsonl')
     n = sum(1 for _ in open(p, encoding='utf-8'))
     print('  压测会话行数：%d（期望 5001）' % n)
+
+# 7. v2.0.0 新增场景抽样（已删除 / 远古 / 批量填充）
+dele = con.execute('select count(*) from sessions where deleted_at is not null').fetchone()[0]
+print('  已删除会话份数：%d（期望 6）%s' % (dele, '' if dele == 6 else ' ✗'))
+anc = con.execute("select count(*) from sessions where id like 'f005%'").fetchone()[0]
+print('  远古会话份数：%d（期望 2）%s' % (anc, '' if anc == 2 else ' ✗'))
+fil = con.execute("select count(*) from sessions where id like 'c0de%'").fetchone()[0]
+print('  批量填充份数：%d（期望 318）%s' % (fil, '' if fil == 318 else ' ✗'))

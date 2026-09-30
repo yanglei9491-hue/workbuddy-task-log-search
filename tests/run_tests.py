@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""暴力测试「会话任务检索」技能。
+"""暴力测试「workbuddy会话查找」技能。
 
 原则：
   1. 期望值由**独立参考实现**计算（不复用技能代码），双轨互证。
@@ -39,6 +39,8 @@ SKIP_PREFIX = (
     'Please continue', '<command-name>', '<local-command',
 )
 
+MAX_TS = 2 ** 63 - 1
+
 
 # ============ 独立参考实现 ============
 
@@ -56,10 +58,11 @@ class Ref:
                               uri=True)
         self.sessions = []
         for r in con.execute('select id,cwd,title,custom_title,created_at,'
-                             'last_activity_at from sessions'):
+                             'last_activity_at,deleted_at from sessions'):
             self.sessions.append({
                 'id': r[0], 'cwd': r[1], 'title': r[2], 'custom_title': r[3],
                 'created_at': r[4], 'last_activity_at': r[5],
+                'deleted_at': r[6],
             })
         con.close()
         self._msgcache = {}
@@ -110,17 +113,28 @@ class Ref:
             res.append(t)
         return res
 
-    def query(self, cwd=None, date=None, days=1, keyword=None, idp=None,
-              index=None, title=None):
-        """按规格返回 (会话列表, 错误信息)。"""
-        d0 = date or datetime.date.today()
-        ndays = max(days, 1)
-        ds = d0 - datetime.timedelta(days=ndays - 1)
-        lo = int(datetime.datetime.combine(ds, datetime.time(0, 0)).timestamp() * 1000)
-        hi = int(datetime.datetime.combine(
-            d0 + datetime.timedelta(days=1), datetime.time(0, 0)).timestamp() * 1000)
+    def query(self, cwd=None, date=None, days=None, keyword=None, idp=None,
+              index=None, title=None, all_time=False, include_deleted=False):
+        """按规格返回 (会话列表, 错误信息)。
+
+        与 scan.py 的语义对齐：
+        · all_time=True，或 idp/title 存在且未显式给 date/days → 全时间窗
+        · index 不触发全局（绑定当次 list 的编号，复跑须同范围参数）
+        · 默认过滤 deleted_at 非空的会话，include_deleted=True 时保留
+        """
+        if all_time or (date is None and days is None and (idp or title)):
+            lo, hi = 0, MAX_TS
+        else:
+            d0 = date or datetime.date.today()
+            ndays = max(days or 1, 1)
+            ds = d0 - datetime.timedelta(days=ndays - 1)
+            lo = int(datetime.datetime.combine(ds, datetime.time(0, 0)).timestamp() * 1000)
+            hi = int(datetime.datetime.combine(
+                d0 + datetime.timedelta(days=1), datetime.time(0, 0)).timestamp() * 1000)
 
         rows = [s for s in self.sessions if lo <= s['last_activity_at'] < hi]
+        if not include_deleted:
+            rows = [s for s in rows if not s['deleted_at']]
 
         if cwd:
             rows = [s for s in rows if cwd.lower() in (s['cwd'] or '').lower()]
@@ -160,9 +174,9 @@ def build_cases():
     """返回用例列表。每例：name, args, 期望（由 reference 算）"""
     C = []
 
-    def case(name, args, ref_kw, kind='list', level='normal'):
+    def case(name, args, ref_kw, kind='list', level='normal', sub=None):
         C.append({'name': name, 'args': args, 'ref': ref_kw, 'kind': kind,
-                  'level': level})
+                  'level': level, 'sub': sub or []})
 
     # ---- A 日期维度 ----
     for dd in ['2026-09-25', '2026-09-26', '2026-09-27', '2026-09-28', '2026-09-29']:
@@ -370,6 +384,48 @@ def build_cases():
          ['--date', '2026-09-29', '--days', '0', '--list'],
          {'date': datetime.date(2026, 9, 29), 'days': 0})
 
+    # ---- M --all 全时间窗 ----
+    case('M-all 列表（全部时间）', ['--all', '--list'],
+         {'all_time': True})
+    case('M-all 命中远古会话', ['--all', '--id', 'f0050001'],
+         {'all_time': True, 'idp': 'f0050001'}, kind='detail')
+    case('M-all 与 date 互斥（负例）',
+         ['--all', '--date', '2026-09-29', '--list'], {},
+         level='negative')
+
+    # ---- N 已删除会话过滤 ----
+    case('N-deleted 默认过滤', ['--date', '2026-09-29', '--days', '5', '--list'],
+         {'date': datetime.date(2026, 9, 29), 'days': 5})
+    case('N-include-deleted 兜底',
+         ['--date', '2026-09-29', '--days', '5', '--include-deleted', '--list'],
+         {'date': datetime.date(2026, 9, 29), 'days': 5,
+          'include_deleted': True})
+    case('N-deleted 标题默认查不到（负例）',
+         ['--title', '已删除的任务', '--list'], {'title': '已删除的任务'},
+         level='negative')
+    case('N-deleted 标题加开关可查',
+         ['--title', '已删除的任务', '--include-deleted', '--list'],
+         {'title': '已删除的任务', 'include_deleted': True})
+    case('N-deleted id 默认查不到（负例）',
+         ['--id', 'de1e0003'], {'idp': 'de1e0003'}, level='negative')
+    case('N-deleted id 加开关命中', ['--id', 'de1e0003', '--include-deleted'],
+         {'idp': 'de1e0003', 'include_deleted': True}, kind='detail')
+
+    # ---- O id/title 无日期默认全局 ----
+    case('O-id 无日期命中远古会话', ['--id', 'f0050002'],
+         {'idp': 'f0050002'}, kind='detail')
+    case('O-id 限定5天查不到远古（负例）',
+         ['--date', '2026-09-29', '--days', '5', '--id', 'f0050002'],
+         {'date': datetime.date(2026, 9, 29), 'days': 5, 'idp': 'f0050002'},
+         level='negative')
+    case('O-title 无日期命中远古会话',
+         ['--title', '远古任务 1', '--list'], {'title': '远古任务 1'})
+
+    # ---- P 紧凑格式 ----
+    case('P-紧凑格式全量编号连续',
+         ['--date', '2026-09-29', '--days', '5', '--list'],
+         {'date': datetime.date(2026, 9, 29), 'days': 5}, sub=['紧凑'])
+
     return C
 
 
@@ -393,15 +449,16 @@ RE_TURNS = re.compile(r'全部回复（(\d+)\s*轮）')
 
 
 def parse_list(out):
-    ids, total = [], None
+    ids, total, idxs = [], None, []
     for ln in out.splitlines():
         m = RE_LINE.match(ln)
         if m:
+            idxs.append(int(m.group(1)))
             ids.append(m.group(2))
         m2 = RE_TOTAL.search(ln)
         if m2:
             total = int(m2.group(1))
-    return ids, total
+    return ids, total, idxs
 
 
 def parse_detail_ids(out):
@@ -427,8 +484,8 @@ def main():
         cases = [c for c in cases if args.only in c['name']]
 
     print('=' * 78)
-    print('暴力测试「会话任务检索」  |  数据集 100 份  |  用例 %d 个  |  重复 %d 次'
-          % (len(cases), args.repeat))
+    print('暴力测试「workbuddy会话查找」  |  数据集 %d 份  |  用例 %d 个  |  重复 %d 次'
+          % (len(ref.sessions), len(cases), args.repeat))
     print('=' * 78)
 
     results = []
@@ -460,7 +517,7 @@ def main():
                     ok_all = False
                     detail = '非预期退出 rc=%d：%s' % (rc, err.strip()[:120])
                 elif is_list:
-                    got_ids, got_total = parse_list(out)
+                    got_ids, got_total, got_idxs = parse_list(out)
                     if got_ids != exp_ids:
                         ok_all = False
                         detail = ('ID 列表不符\n    期望(%d) %s\n    实际(%d) %s'
@@ -469,6 +526,14 @@ def main():
                     elif got_total != len(exp_ids):
                         ok_all = False
                         detail = '计数不符：期望 %d 实际 %s' % (len(exp_ids), got_total)
+                    elif ('--id' not in c['args'] and '--title' not in c['args']
+                          and got_idxs != list(range(1, len(exp_ids) + 1))):
+                        # 仅纯净列表（无 id/title 收窄）要求编号连续；
+                        # --id/--title 与 --list 合用时编号是范围列表中的原始位置，
+                        # 保证 --index 同编号可回取，连续性不适用
+                        ok_all = False
+                        detail = ('编号不连续：期望 1..%d 实际 %s'
+                                  % (len(exp_ids), got_idxs[:20]))
                 else:
                     got_ids = parse_detail_ids(out)
                     if got_ids != exp_ids:
@@ -479,6 +544,11 @@ def main():
                     if c['kind'] == 'turns' and not RE_TURNS.search(out):
                         ok_all = False
                         detail = '未输出轮次统计'
+
+            for s in (c.get('sub') or []):
+                if s not in out and s not in err:
+                    ok_all = False
+                    detail = '输出缺少期望子串：%s' % s
 
             if args.repeat > 1 and len(set(outs)) > 1:
                 ok_all = False

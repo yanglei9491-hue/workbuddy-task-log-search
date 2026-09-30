@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""构造 100 份对抗性测试数据集，用于暴力测试「会话任务检索」技能。
+"""构造 328 份对抗性测试数据集，用于暴力测试「workbuddy会话查找」技能。
 
 输出到桌面「测试数据集」文件夹，结构模拟真实 ~/.workbuddy：
     测试数据集/
-    ├── workbuddy.db           # sessions 表，100 条记录
+    ├── workbuddy.db           # sessions 表，328 条记录
     ├── projects/<cwd编码>/<会话ID>.jsonl
     ├── _ground_truth.json     # 真值表（期望结果的唯一依据）
     └── README.md
@@ -18,6 +18,9 @@
   · 关键词仅命中正文、仅命中标题、命中系统消息、越界消息命中
   · 共享 8 位前缀的会话 ID
   · 1 份超大会话（5000 条消息）用于性能压测
+  · 已删除会话 6 份（测 deleted_at 默认过滤与 --include-deleted 兜底）
+  · 远古会话 2 份（落在 2026-09-20，任何日期窗口之外，测 --all 与窗口区分）
+  · 批量填充 220 份（只落 d25-d28，把 5 日窗口推到 320 行触发紧凑格式）
 
 用法：
     python gen_dataset.py [输出目录]
@@ -87,16 +90,17 @@ def msg(mid, off, role, text):
 
 
 def build_specs():
-    """返回 100 份会话规格（确定性）。"""
+    """返回 328 份会话规格（确定性）。"""
     specs = []
     n = 0
 
-    def add(cwd, title, custom, created, last, msgs, note=''):
+    def add(cwd, title, custom, created, last, msgs, note='', deleted=False,
+            sid=None):
         nonlocal n
         n += 1
         # 前 8 位唯一且可读，便于比对与人工核对（不用 uuid.UUID(int=n)，
         # 那会让小 n 的 id8 全为 00000000，丧失区分度）
-        sid = '%08x-0000-4000-8000-%012x' % (0xc0de0000 + n, n)
+        sid = sid or ('%08x-0000-4000-8000-%012x' % (0xc0de0000 + n, n))
         specs.append({
             'seq': n,
             'id': sid,
@@ -105,6 +109,7 @@ def build_specs():
             'custom_title': custom,
             'created_at': created,
             'last_activity_at': last,
+            'deleted_at': (last + 60000) if deleted else None,
             'msgs': msgs,
             'note': note,
         })
@@ -277,6 +282,43 @@ def build_specs():
     add('E:/workspace/perf-stress', '超大会话 5000 条', None,
         ts(d, 10, 0), ts(d, 10, 0) + 5000, big, '性能压测')
 
+    # ---- ⑫ 已删除会话 6 份（deleted_at 非空；落 d25×2 / d28×2 / d29×2）----
+    # d29 的 2 份被默认过滤后不可见 → d29 可见数维持 17，I-index 越界负例不受影响
+    dd_map = ['d25', 'd25', 'd28', 'd28', 'd29', 'd29']
+    for i in range(6):
+        d = D[dd_map[i]]
+        msgs = [
+            msg('m1', ts(d, 18, 0) + i, 'user', '已删除会话的内容 %d' % i),
+            msg('m2', ts(d, 18, 1) + i, 'assistant', '已删除会话的结论 %d' % i),
+        ]
+        add(CWDS[i % len(CWDS)], '已删除的任务 %d' % i, None, ts(d, 18, 0),
+            ts(d, 18, 1) + i, msgs, '已删除：默认应过滤', deleted=True,
+            sid='de1e%04d-0000-4000-8000-%012d' % (i + 1, i + 1))
+
+    # ---- ⑬ 远古会话 2 份（last_activity 落在 2026-09-20，任何日期窗口之外）----
+    old = datetime.date(2026, 9, 20)
+    for i in range(2):
+        msgs = [
+            msg('m1', ts(old, 10, 0) + i, 'user', '远古需求 %d' % i),
+            msg('m2', ts(old, 10, 1) + i, 'assistant', '远古结论 %d' % i),
+        ]
+        add(CWDS[0], '远古任务 %d' % i, None, ts(old, 10, 0),
+            ts(old, 10, 1) + i, msgs, '远古：仅 --all 或足够长的 --days 能命中',
+            sid='f005%04d-0000-4000-8000-%012d' % (i + 1, i + 1))
+
+    # ---- ⑭ 批量填充 220 份（只落 d25-d28，把 5 日窗口推到 320 行触发紧凑格式）----
+    # 专用 cwd（不含任何用例的 cwd 关键词）；标题/正文不含任何用例关键词；
+    # 20 点整无人占用，last_activity 加毫秒级偏移保证全库唯一
+    fdays = ['d25', 'd26', 'd27', 'd28']
+    for i in range(220):
+        d = D[fdays[i % 4]]
+        msgs = [
+            msg('m1', ts(d, 20, 0) + i, 'user', '填充消息 %d' % i),
+            msg('m2', ts(d, 20, 0) + 1000 + i, 'assistant', '填充回复 %d' % i),
+        ]
+        add('E:/bulk/filler-zone', '批量填充 %d' % i, None, ts(d, 20, 0),
+            ts(d, 20, 1) + i, msgs, '批量填充（紧凑格式）')
+
     return specs
 
 
@@ -306,7 +348,7 @@ def main():
     os.makedirs(proj, exist_ok=True)
 
     specs = build_specs()
-    assert len(specs) == 100, '期望 100 份，实际 %d' % len(specs)
+    assert len(specs) == 328, '期望 328 份，实际 %d' % len(specs)
 
     # 建 db
     db = os.path.join(out, 'workbuddy.db')
@@ -320,11 +362,11 @@ def main():
     for s in specs:
         con.execute(
             'insert into sessions(id,cwd,title,custom_title,status,created_at,'
-            'updated_at,last_activity_at,model,source_mode) '
-            'values(?,?,?,?,?,?,?,?,?,?)',
+            'updated_at,last_activity_at,model,source_mode,deleted_at) '
+            'values(?,?,?,?,?,?,?,?,?,?,?)',
             (s['id'], s['cwd'], s['title'], s['custom_title'], 'completed',
              s['created_at'], s['last_activity_at'], s['last_activity_at'],
-             'custom-local:test-model', 'test'))
+             'custom-local:test-model', 'test', s['deleted_at']))
         # 写 jsonl
         sub = os.path.join(proj, encode_cwd(s['cwd']))
         os.makedirs(sub, exist_ok=True)
@@ -345,6 +387,7 @@ def main():
             'cwd': s['cwd'], 'title': s['custom_title'] or s['title'],
             'title_field': s['title'], 'custom_title': s['custom_title'],
             'created_at': s['created_at'], 'last_activity_at': s['last_activity_at'],
+            'deleted': bool(s['deleted_at']), 'deleted_at': s['deleted_at'],
             'date': datetime.datetime.fromtimestamp(
                 s['last_activity_at'] / 1000).strftime('%Y-%m-%d'),
             'note': s['note'],
@@ -357,15 +400,15 @@ def main():
               encoding='utf-8') as f:
         json.dump(truth, f, ensure_ascii=False, indent=1)
 
-    readme = '''# 测试数据集（100 份）
+    readme = '''# 测试数据集（328 份）
 
-模拟 `~/.workbuddy` 结构，用于暴力测试「会话任务检索」技能。
+模拟 `~/.workbuddy` 结构，用于暴力测试「workbuddy会话查找」技能。
 
 | 项 | 值 |
 |---|---|
-| 会话数 | 100 |
-| 日期范围 | 2026-09-25 ~ 2026-09-29 |
-| 工作目录 | 8 个（含中文、大小写混合、特殊字符） |
+| 会话数 | 328 |
+| 日期范围 | 2026-09-20 ~ 2026-09-29（含 2 份远古会话落在 09-20） |
+| 工作目录 | 9 个（含中文、大小写混合、特殊字符、批量填充专区） |
 | 总消息数 | %d |
 
 ## 对抗场景分布
@@ -383,6 +426,16 @@ def main():
 | 关键词分布 | 10 | 标题/正文/都有/都无/区间外 |
 | 共享 ID 前缀 | 2 | `abcd1234...` |
 | 性能压测 | 1 | 5000 条消息 |
+| 已删除会话 | 6 | `de1e` 前缀；默认过滤，`--include-deleted` 可见 |
+| 远古会话 | 2 | `f005` 前缀，last_activity 在 09-20，仅 `--all`/长窗口命中 |
+| 批量填充 | 220 | `c0de` 前缀，只落 d25-d28，5 日窗口 320 行触发紧凑格式 |
+
+## 计数口径（供用例比对）
+
+- db 共 328 行；`deleted_at` 非空 6 行 → 默认可见 322
+- `--days 5`（d25-d29）默认可见 320（6 份已删除中落在该窗口的 6 份不可见；
+  d29 可见数维持 17，I-index 越界负例的生命线）
+- `--all` 默认可见 322；`--all --include-deleted` 328
 
 真值表见 `_ground_truth.json`（期望结果的唯一依据）。
 ''' % (sum(s['msg_count'] for s in truth), DUP_TITLE)
