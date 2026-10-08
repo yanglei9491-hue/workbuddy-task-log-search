@@ -59,7 +59,7 @@ ASCII slug，如 `workbuddy-task-log-search`）：
 也可以直接克隆到技能目录：
 
 ```bash
-git clone https://github.com/yanglei9491-hue/workbuddy-session-search.git \
+git clone https://github.com/yanglei9491-hue/workbuddy-task-log-search.git \
           ~/.workbuddy/skills/10-utility/workbuddy任务日志查找
 ```
 
