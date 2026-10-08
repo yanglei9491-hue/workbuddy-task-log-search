@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""workbuddy会话查找 —— 跨会话读取本机 WorkBuddy 历史任务与对话内容。
+"""workbuddy任务日志查找 —— 跨会话读取本机 WorkBuddy 历史任务与对话内容。
 
 只读操作：读 workbuddy.db 会话索引 + projects/*.jsonl 对话全文。
 
@@ -27,6 +27,15 @@ import os
 import re
 import sqlite3
 import sys
+
+# 输出编码固化：在非 UTF-8 控制台（如 Windows GBK 代码页）下，标题含 emoji 等
+# 不可编码字符时 print 会抛 UnicodeEncodeError 并甩出 traceback。这里统一改为
+# UTF-8 + errors='replace'，保证不崩、不泄露 traceback；个别字符显示为替换符。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
 
 # 数据根目录：默认 ~/.workbuddy，可用 --home 覆盖（供隔离测试）
 HOME = os.path.expanduser('~') + '/.workbuddy'
@@ -134,7 +143,7 @@ def collect(sess, lo_ms, hi_ms, keyword=None):
 
 def main():
     ap = argparse.ArgumentParser(
-        description='workbuddy会话查找 —— 跨会话检索本机 WorkBuddy 历史任务')
+        description='workbuddy任务日志查找 —— 跨会话检索本机 WorkBuddy 历史任务')
     ap.add_argument('--date', help='日期 YYYY-MM-DD，默认今天')
     ap.add_argument('--days', type=int, default=None,
                     help='最近 N 天（含指定日或今天）；--days 0 等价 1 天；与 --all 互斥')
@@ -257,7 +266,7 @@ def main():
              else (d_start.strftime('%Y-%m-%d') if ndays == 1
                    else '%s ~ %s' % (d_start, d_end)))
     print('=' * 74)
-    print('WorkBuddy 会话查找 | %s' % label)
+    print('WorkBuddy 任务日志查找 | %s' % label)
     print('=' * 74)
 
     if args.list:
@@ -399,7 +408,7 @@ footer{text-align:center;color:#a0a5ad;font-size:12px;margin-top:28px}
 <h1>任务清单 · %s</h1>
 <div class="sub">共 %d 个任务会话 · 数据来自本地会话索引与对话全文</div>
 <div class="note"><b>这些内容一直在你电脑里。</b>索引在 <code>~/.workbuddy/workbuddy.db</code>，对话全文在 <code>~/.workbuddy/projects/&lt;工作目录&gt;/&lt;会话ID&gt;.jsonl</code>，每个会话一个文件，明文可读。</div>
-%s<footer>WorkBuddy · workbuddy会话查找</footer></div></body></html>''' % (
+%s<footer>WorkBuddy · workbuddy任务日志查找</footer></div></body></html>''' % (
         label, label, len(cards), blocks)
     open(out, 'w', encoding='utf-8').write(doc)
     return out

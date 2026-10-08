@@ -1,6 +1,6 @@
-# WorkBuddy Session Search
+# WorkBuddy Task Log Search · workbuddy任务日志查找
 
-**一个用于 WorkBuddy 的技能（技能名 `workbuddy会话查找`）：跨会话检索本机历史任务与对话内容。**
+**一个用于 WorkBuddy 的技能（显示名 `workbuddy任务日志查找`；`SKILL.md` 的 `name` 为 ASCII slug `workbuddy-task-log-search`）：跨会话检索本机历史任务与对话内容。**
 
 WorkBuddy 的每个会话运行在独立的上下文沙箱里，互相看不见。但每个会话的完整对话都会
 **明文落盘**在本地，因此可以被检索。这个技能就是把「我今天都跑了哪些任务」这个问题
@@ -44,8 +44,9 @@ WorkBuddy 的会话是隔离的——在 A 会话里无法直接看到 B 会话�
 
 ## 安装
 
-把本目录整体放进 WorkBuddy 技能目录（目录名随意，技能实名以 `SKILL.md` 的
-`name` 字段为准）：
+把本目录整体放进 WorkBuddy 技能目录。**目录名可用中文显示名**（如
+`workbuddy任务日志查找`），技能实名以 `SKILL.md` 的 `name` 字段为准（必须是
+ASCII slug，如 `workbuddy-task-log-search`）：
 
 ```
 ~/.workbuddy/skills/<分类>/<任意目录名>/
@@ -59,14 +60,14 @@ WorkBuddy 的会话是隔离的——在 A 会话里无法直接看到 B 会话�
 
 ```bash
 git clone https://github.com/yanglei9491-hue/workbuddy-session-search.git \
-          ~/.workbuddy/skills/10-utility/workbuddy-session-search
+          ~/.workbuddy/skills/10-utility/workbuddy任务日志查找
 ```
 
 ## 使用
 
 ```bash
 PY="$HOME/.workbuddy/binaries/python/versions/3.13.12/python.exe"
-SCAN="$HOME/.workbuddy/skills/10-utility/workbuddy-session-search/scripts/scan.py"
+SCAN="$HOME/.workbuddy/skills/10-utility/workbuddy任务日志查找/scripts/scan.py"
 
 # ---- 浏览 ----
 "$PY" "$SCAN"                          # 今天的任务（裸跑仅为 CLI 兼容）
@@ -141,7 +142,7 @@ SCAN="$HOME/.workbuddy/skills/10-utility/workbuddy-session-search/scripts/scan.p
 
 ```bash
 PY="$HOME/.workbuddy/binaries/python/versions/3.13.12/python.exe"
-T="$HOME/.workbuddy/skills/10-utility/workbuddy-session-search/tests"
+T="$HOME/.workbuddy/skills/10-utility/workbuddy任务日志查找/tests"
 
 "$PY" "$T/gen_dataset.py"              # 建数据集（默认输出到桌面）
 "$PY" "$T/verify_dataset.py"           # 校验数据集
@@ -170,7 +171,8 @@ T="$HOME/.workbuddy/skills/10-utility/workbuddy-session-search/tests"
 **资源边界**：关键词模式扫描窗口建议不超过 30 天；更大范围先用 `--cwd`/`--list` 收窄，
 或直接用 `--all --list`（列表不读全文，无成本）。
 
-**抗压边界**：50MB 单行 JSON 下各模式均为亚秒级响应，不崩溃、输出被截断保护在 100KB。
+**抗压边界**：50MB 单行 JSON 下各模式均为亚秒级响应（实测 4 种模式均 `rc=0`、<1s），
+不崩溃；**单条消息**输出被截断保护在 100000 字符（约 100KB，**非全局输出上限**）。
 按行读 + 输出截断天然免疫超大单行。
 
 ---
@@ -202,6 +204,20 @@ T="$HOME/.workbuddy/skills/10-utility/workbuddy-session-search/tests"
 - **不修改任何数据**。全程只读；已删除会话默认不出现，`--include-deleted` 才会纳入。
 - **对话全文含隐私内容**，生成的报告默认落在本机，请注意分享范围；本仓库的示例数据
   均为示意值。
+- **不适用于非 WorkBuddy 的检索**。本技能只处理「本机 WorkBuddy 会话记录」这**一类**数据：
+  不检索微信文章 / 网页 / 普通文件内容，不做通用网络搜索；这类请求请交给对应的搜索或
+  文件检索技能。也不读工具调用轨迹（`function_call` / `function_call_result`），
+  只想找回命令回显请直接读 `~/.workbuddy/projects/**/*.jsonl`。
+
+## 版本与变更
+
+| 版本 | 变更 |
+|------|------|
+| **2.1.0** | 更名 `workbuddy任务日志查找`（`name` 改为 ASCII slug `workbuddy-task-log-search`）；**固化输出编码**（`sys.stdout/stderr.reconfigure(encoding='utf-8', errors='replace')`），修复 GBK 控制台下遇非 GBK 字符（如标题含 emoji）抛 `UnicodeEncodeError` 的问题；补 `LICENSE` 文件；补「不适用场景」负向触发声明；修正 `--index` 标题行文档与实际输出不一致；`tests/` 运行时产物改为不入发布包（`.gitignore`）；`bench.py` 移除硬编码真实会话 ID（改示意值 `a1b2c3d4` + `BENCH_SESSION_ID` 环境变量） |
+| 2.0.0 | 时间范围交互化 + 三项行为升级；更名 `workbuddy会话查找` |
+| 1.0.0 | 首版 |
+
+**环境依赖**：① 命令块中的 `PY` 硬编码管理版 Python（`~/.workbuddy/binaries/python/versions/3.13.12/python.exe`），换 WorkBuddy / Python 版本后需替换为当前管理版路径；② `--html` 默认输出到 `~/Desktop`（假定桌面目录名为英文 `Desktop`），若系统桌面为本地化名称请用 `--out` 显式指定。
 
 ## 许可证
 

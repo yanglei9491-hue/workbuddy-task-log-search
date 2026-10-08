@@ -2,3 +2,7 @@ __pycache__/
 *.pyc
 *.pyo
 .venv/
+
+# 运行时产物：由 tests/run_tests.py 与 tests/bench.py 生成，含机器特定数据，不入发布包
+tests/perf_result.json
+tests/test_result.json

@@ -1,7 +1,8 @@
 ---
-name: workbuddy会话查找
-description: 跨会话检索本机 WorkBuddy 的历史任务与对话内容。从本地会话索引库（~/.workbuddy/workbuddy.db 的 sessions 表，默认过滤已删除会话）列出用户选定时间范围（当天/最近一周/最近一个月/全部）的全部任务会话，再逐个读取对话全文（~/.workbuddy/projects/<工作目录编码>/<会话ID>.jsonl），提取用户需求原文与最终结论，输出清单、详情或 HTML 报告。支持按序号、会话 ID、标题精确命中单个任务（ID/标题未指定日期时默认可全局检索），并可导出该任务全部回复轮次。用户提到查我今天的任务、查下对话日志、查下任务日志、查下对话、今天做了什么、找某天的任务、跨会话、之前那个会话讲了什么、会话记录、对话日志、任务清单、精确查找某个任务时使用。触发词：今天的任务、今天做了什么、查任务、查下对话日志、查下任务日志、查下对话、会话记录、对话日志、跨会话、历史会话、任务清单、精确查找、第几个任务、某个任务。
-version: 2.0.0
+name: workbuddy-task-log-search
+displayName: workbuddy任务日志查找
+description: 跨会话检索本机 WorkBuddy 的历史任务与对话内容。从本地会话索引库（~/.workbuddy/workbuddy.db 的 sessions 表，默认过滤已删除会话）列出用户选定时间范围（当天/最近一周/最近一个月/全部）的全部任务，再逐个读取对话全文（~/.workbuddy/projects/<工作目录编码>/<会话ID>.jsonl），提取用户需求原文与最终结论，输出清单、详情或 HTML 报告。支持按序号、会话 ID、标题精确命中单个任务（ID/标题未指定日期时默认可全局检索），并可导出该任务全部回复轮次。触发场景：查我今天的任务、查下对话日志、查下任务日志、查下对话、今天做了什么、找某天的任务、跨会话、之前那个会话讲了什么、会话记录、对话日志、任务清单、精确查找某个任务。不适用：本技能只读本机 WorkBuddy 会话记录，不检索微信文章/网页/普通文件内容，不做通用网络搜索，也不读取工具调用轨迹（只读对话正文）；此类请求请勿使用本技能。
+version: 2.1.0
 license: MIT
 compatibility: "WorkBuddy >= 1.0"
 allowed-tools: [Read, Write, Bash, AskUserQuestion]
@@ -10,7 +11,7 @@ metadata:
   agent_created: true
 ---
 
-# workbuddy会话查找
+# workbuddy任务日志查找
 
 解决「跨会话内容看不到」的问题——运行时会话互相隔离，但每个会话的完整对话都**明文落盘**，所以可以按日期/目录检索出历史任务的真实内容。
 
@@ -33,11 +34,23 @@ metadata:
 - 只存在于**工具输出**里、正文未复述的信息（如 `ls` 原始回显、报错堆栈）→ **检索不到**
 - 想让它能被检索，就得在回复正文里**复述**一次（这也是"产出物清单要写进正文"的实际价值）
 
+## 不适用场景（负向触发 · 别用错技能）
+
+| 用户诉求 | 是否用本技能 | 应该用什么 |
+|----------|--------------|------------|
+| 查本机 WorkBuddy 的历史任务 / 对话 / 任务日志 | ✅ 用 | 本技能 |
+| 搜微信公众号文章、网页、新闻 | ❌ 不用 | 微信搜索 / 网络搜索类技能 |
+| 在本机文件系统里找某个文件或文件内容 | ❌ 不用 | 文件检索（Glob / Grep / `ls`） |
+| 查云端已索引的历史会话（昨天及更早） | ⚠️ 可用但非必需 | `conversation_search`（当天数据未索引，**查当天必须用本技能**） |
+| 想找回**工具调用 / 命令回显**里的原始输出 | ❌ 做不到 | 直接读 `~/.workbuddy/projects/**/*.jsonl`；本技能刻意跳过工具轨迹 |
+
+**判定口诀**：只处理「本机 WorkBuddy 会话记录」这**一类**数据；一旦跨到微信 / 网页 / 普通文件 / 网络搜索，一律不接。
+
 ## 执行命令
 
 ```bash
 PY="$HOME/.workbuddy/binaries/python/versions/3.13.12/python.exe"
-SCAN="$HOME/.workbuddy/skills/10-utility/workbuddy会话查找/scripts/scan.py"
+SCAN="$HOME/.workbuddy/skills/10-utility/workbuddy任务日志查找/scripts/scan.py"
 
 # ---- 浏览 ----
 "$PY" "$SCAN"                          # 今天的任务（裸跑仅为 CLI 兼容）
@@ -104,16 +117,18 @@ SCAN="$HOME/.workbuddy/skills/10-utility/workbuddy会话查找/scripts/scan.py"
 | `tests/bench.py` | 性能基准（测试集 328 份 + 真实库双场景） |
 | `tests/report_gen.py` | 生成 HTML + Markdown 测试报告 |
 
-运行时产物（脚本自动生成，非手工维护，勿作为权威数据引用）：
+运行时产物（脚本自动生成，**不入发布包**）：
 
-| 文件 | 由谁生成 |
-|------|----------|
-| `tests/test_result.json` | `run_tests.py` 每次运行覆盖 |
-| `tests/perf_result.json` | `bench.py` 每次运行覆盖 |
+| 文件 | 由谁生成 | 说明 |
+|------|----------|------|
+| `tests/test_result.json` | `run_tests.py` | 每次运行覆盖，含本机耗时/会话数等**机器特定**数据 |
+| `tests/perf_result.json` | `bench.py` | 同上 |
+
+这两个 JSON 不是手工维护的资产，**勿作为权威数据引用**；发布前请删除（已在 `.gitignore` 中忽略）。
 
 ```bash
 PY="$HOME/.workbuddy/binaries/python/versions/3.13.12/python.exe"
-T="$HOME/.workbuddy/skills/10-utility/workbuddy会话查找/tests"
+T="$HOME/.workbuddy/skills/10-utility/workbuddy任务日志查找/tests"
 
 "$PY" "$T/gen_dataset.py"              # 建数据集（输出到桌面）
 "$PY" "$T/verify_dataset.py"           # 校验数据集
@@ -161,9 +176,13 @@ T="$HOME/.workbuddy/skills/10-utility/workbuddy会话查找/tests"
 （结果较多，已切换紧凑格式：省略目录列；完整目录/正文用 --index N 查看）
 ```
 
-**详情模式**（默认，或 `--index`/`--id`/`--title`）。按用户给出的指定方式决定标题行：
-带 `--index` 时标题为 `## N. <会话标题>`；带 `--id`/`--title`（或单独使用时）标题为
-`精确命中  #N  <会话标题>`。字段为独立行：
+**详情模式**（默认浏览，或 `--index`/`--id`/`--title` 精确命中）。标题行分两种，判定依据是
+是否给了「精确定位参数」——`--index`、`--id`、`--title` **任给其一**即视为精确命中：
+
+- 给了任一（精确命中）→ `精确命中  #N  <会话标题>`
+- 三者都未给（默认浏览）→ `## N. <会话标题>`
+
+字段为独立行：
 
 ```
 精确命中  #3  报表脚本重构
@@ -237,3 +256,6 @@ T="$HOME/.workbuddy/skills/10-utility/workbuddy会话查找/tests"
 - `--all --html` 会读全部正文（数十秒、产出超大 HTML），非必要不用。
 - `conversation_search`（云端历史检索）对当天数据**尚未索引**，查昨天/更早可用，查当天必须用本技能读本地文件。
 - 会话标题由 `custom_title` 优先，回退 `title`（AI 自动生成）。
+- **环境依赖 1 · 解释器路径**：命令块里的 `PY` 硬编码管理版 Python（`~/.workbuddy/binaries/python/versions/3.13.12/python.exe`）。换 WorkBuddy 版本或 Python 版本后该路径会失效，需替换为当前管理版路径（`ls ~/.workbuddy/binaries/python/versions/` 可查看；用裸 `python` 可能缺依赖）。
+- **环境依赖 2 · 桌面路径**：`--html` 默认输出到 `os.path.join(os.path.expanduser('~'), 'Desktop')`，即假定桌面目录名为英文 `Desktop`（Windows 默认如此）。若系统把桌面本地化为中文名，请用 `--out <路径>` 显式指定。
+- **环境依赖 3 · 输出编码**：`scan.py` 启动时会调用 `sys.stdout.reconfigure(encoding='utf-8', errors='replace')` 固化输出编码，避免 GBK 控制台下遇到非 GBK 字符（如标题含 emoji）抛 `UnicodeEncodeError`。`errors='replace'` 保证不崩，但极少数不可编码字符会显示为替换符。

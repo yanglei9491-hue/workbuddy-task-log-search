@@ -43,11 +43,11 @@ for r in T['results']:
 
 # ---------- Markdown ----------
 md = []
-md.append('# workbuddy会话查找技能 · 暴力测试报告')
+md.append('# workbuddy任务日志查找技能 · 暴力测试报告')
 md.append('')
 md.append('| 项 | 值 |')
 md.append('|---|---|')
-md.append('| 被测对象 | `10-utility/workbuddy会话查找`（v%s） |' % VER)
+md.append('| 被测对象 | `10-utility/workbuddy任务日志查找`（v%s） |' % VER)
 md.append('| 测试日期 | %s |' % TODAY)
 md.append('| 测试类型 | 穷举/暴力测试（准确率 + 稳定性 + 速度） |')
 md.append('| 用例总数 | %d |' % T['total'])
@@ -64,7 +64,7 @@ md.append('---')
 md.append('')
 md.append('## 一、测试对象与方法')
 md.append('')
-md.append('被测脚本：`skills/10-utility/workbuddy会话查找/scripts/scan.py`')
+md.append('被测脚本：`skills/10-utility/workbuddy任务日志查找/scripts/scan.py`')
 md.append('')
 md.append('**双轨验证**：期望值由独立参考实现计算（直接读 db + jsonl 按规格重算），'
           '不复用被测代码任何一行，避免"自己考自己"。')
@@ -235,7 +235,7 @@ for g in sorted(groups):
     md.append('')
 
 mdtext = '\n'.join(md)
-open(os.path.join(DESKTOP, 'workbuddy会话查找_暴力测试报告_20260930.md'), 'w',
+open(os.path.join(DESKTOP, 'workbuddy任务日志查找_暴力测试报告_20260930.md'), 'w',
      encoding='utf-8').write(mdtext)
 
 # ---------- HTML ----------
@@ -270,7 +270,7 @@ for g in sorted(groups):
 doc = '''<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>workbuddy会话查找 · 暴力测试报告</title><style>
+<title>workbuddy任务日志查找 · 暴力测试报告</title><style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;background:#f5f6f8;color:#1f2329;line-height:1.7;padding:34px 20px}
 .wrap{max-width:960px;margin:0 auto}
@@ -300,8 +300,8 @@ ul{margin:8px 0 8px 20px}li{margin:4px 0;font-size:13.5px}
 .t{font-size:12.5px}
 footer{text-align:center;color:#a0a5ad;font-size:12px;margin-top:34px}
 </style></head><body><div class="wrap">
-<h1>workbuddy会话查找技能 · 暴力测试报告</h1>
-<div class="sub">被测对象 <code>10-utility/workbuddy会话查找</code>（v%s） · 测试日期 %s · 穷举/暴力测试</div>
+<h1>workbuddy任务日志查找技能 · 暴力测试报告</h1>
+<div class="sub">被测对象 <code>10-utility/workbuddy任务日志查找</code>（v%s） · 测试日期 %s · 穷举/暴力测试</div>
 
 <div class="kpi">
   <div class="card"><div class="lb">准确率</div><div class="vl green">%.2f%%</div><div class="ft">%d / %d 用例</div></div>
@@ -313,7 +313,7 @@ footer{text-align:center;color:#a0a5ad;font-size:12px;margin-top:34px}
 
 <h2>一、测试对象与方法</h2>
 <table><tbody>
-<tr><th style="width:130px">被测脚本</th><td><code>skills/10-utility/workbuddy会话查找/scripts/scan.py</code></td></tr>
+<tr><th style="width:130px">被测脚本</th><td><code>skills/10-utility/workbuddy任务日志查找/scripts/scan.py</code></td></tr>
 <tr><th>双轨验证</th><td>期望值由<b>独立参考实现</b>计算（直接读 db + jsonl 按规格重算），不复用被测代码任何一行，避免「自己考自己」</td></tr>
 <tr><th>隔离环境</th><td>为构造 %d 份对抗数据，给技能新增 <code>--home</code> 参数（默认仍为 <code>~/.workbuddy</code>，向后兼容），测试全程指向桌面数据集，<b>不触碰真实数据</b></td></tr>
 <tr><th>真实调用</th><td>每用例独立 <code>subprocess</code> 调用，真实测量启动 + 查询 + 输出全链路耗时</td></tr>
@@ -422,8 +422,8 @@ footer{text-align:center;color:#a0a5ad;font-size:12px;margin-top:34px}
     T['total'],
     blocks)
 
-out_html = os.path.join(DESKTOP, 'workbuddy会话查找_暴力测试报告_20260930.html')
+out_html = os.path.join(DESKTOP, 'workbuddy任务日志查找_暴力测试报告_20260930.html')
 open(out_html, 'w', encoding='utf-8').write(doc)
 print('HTML 报告：%s' % out_html)
 print('MD  报告：%s' % os.path.join(DESKTOP,
-                              'workbuddy会话查找_暴力测试报告_20260930.md'))
+                              'workbuddy任务日志查找_暴力测试报告_20260930.md'))

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""暴力测试「workbuddy会话查找」技能。
+"""暴力测试「workbuddy任务日志查找」技能。
 
 原则：
   1. 期望值由**独立参考实现**计算（不复用技能代码），双轨互证。
@@ -484,7 +484,7 @@ def main():
         cases = [c for c in cases if args.only in c['name']]
 
     print('=' * 78)
-    print('暴力测试「workbuddy会话查找」  |  数据集 %d 份  |  用例 %d 个  |  重复 %d 次'
+    print('暴力测试「workbuddy任务日志查找」  |  数据集 %d 份  |  用例 %d 个  |  重复 %d 次'
           % (len(ref.sessions), len(cases), args.repeat))
     print('=' * 78)
 
